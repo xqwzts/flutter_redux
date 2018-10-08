@@ -2,6 +2,7 @@ library flutter_redux;
 
 import 'dart:async';
 
+import 'package:async/async.dart';
 import 'package:flutter/widgets.dart';
 import 'package:meta/meta.dart';
 import 'package:redux/redux.dart';
@@ -161,6 +162,10 @@ class StoreConnector<S, ViewModel> extends StatelessWidget {
   /// onChange event.
   final bool rebuildOnChange;
 
+  /// Indicates whether or not the Widget should rebuild when [didUpdateWidget]
+  /// is triggered.
+  final bool rebuildOnUpdate;
+
   /// A test of whether or not your [converter] function should run in response
   /// to a State change. For advanced use only.
   ///
@@ -216,6 +221,7 @@ class StoreConnector<S, ViewModel> extends StatelessWidget {
     this.onInit,
     this.onDispose,
     this.rebuildOnChange = true,
+    this.rebuildOnUpdate = false,
     this.ignoreChange,
     this.onWillChange,
     this.onDidChange,
@@ -234,6 +240,7 @@ class StoreConnector<S, ViewModel> extends StatelessWidget {
       onInit: onInit,
       onDispose: onDispose,
       rebuildOnChange: rebuildOnChange,
+      rebuildOnUpdate: rebuildOnUpdate,
       ignoreChange: ignoreChange,
       onWillChange: onWillChange,
       onDidChange: onDidChange,
@@ -257,6 +264,10 @@ class StoreBuilder<S> extends StatelessWidget {
   /// Indicates whether or not the Widget should rebuild when the [Store] emits
   /// an `onChange` event.
   final bool rebuildOnChange;
+
+  /// Indicates whether or not the Widget should rebuild when [didUpdateWidget]
+  /// is triggered.
+  final bool rebuildOnUpdate;
 
   /// A function that will be run when the StoreConnector is initially created.
   /// It is run in the [State.initState] method.
@@ -302,6 +313,7 @@ class StoreBuilder<S> extends StatelessWidget {
     this.onInit,
     this.onDispose,
     this.rebuildOnChange = true,
+    this.rebuildOnUpdate = false,
     this.onWillChange,
     this.onDidChange,
     this.onInitialBuild,
@@ -314,6 +326,7 @@ class StoreBuilder<S> extends StatelessWidget {
       builder: builder,
       converter: _identity,
       rebuildOnChange: rebuildOnChange,
+      rebuildOnUpdate: rebuildOnUpdate,
       onInit: onInit,
       onDispose: onDispose,
       onWillChange: onWillChange,
@@ -329,6 +342,7 @@ class _StoreStreamListener<S, ViewModel> extends StatefulWidget {
   final StoreConverter<S, ViewModel> converter;
   final Store<S> store;
   final bool rebuildOnChange;
+  final bool rebuildOnUpdate;
   final bool distinct;
   final OnInitCallback<S> onInit;
   final OnDisposeCallback<S> onDispose;
@@ -346,6 +360,7 @@ class _StoreStreamListener<S, ViewModel> extends StatefulWidget {
     this.onInit,
     this.onDispose,
     this.rebuildOnChange = true,
+    this.rebuildOnUpdate = false,
     this.ignoreChange,
     this.onWillChange,
     this.onDidChange,
@@ -362,6 +377,7 @@ class _StoreStreamListenerState<S, ViewModel>
     extends State<_StoreStreamListener<S, ViewModel>> {
   Stream<ViewModel> stream;
   ViewModel latestValue;
+  StreamController _updateController = StreamController<dynamic>(sync: true);
 
   @override
   void initState() {
@@ -376,6 +392,8 @@ class _StoreStreamListenerState<S, ViewModel>
       widget.onDispose(widget.store);
     }
 
+    _updateController.close();
+
     super.dispose();
   }
 
@@ -383,6 +401,8 @@ class _StoreStreamListenerState<S, ViewModel>
   void didUpdateWidget(_StoreStreamListener<S, ViewModel> oldWidget) {
     if (widget.store != oldWidget.store) {
       _init();
+    } else if (widget.rebuildOnUpdate) {
+      _updateController.add(null);
     }
 
     super.didUpdateWidget(oldWidget);
@@ -407,7 +427,12 @@ class _StoreStreamListenerState<S, ViewModel>
       _stream = _stream.where((state) => !widget.ignoreChange(state));
     }
 
-    stream = _stream.map((_) => widget.converter(widget.store));
+    final Stream<dynamic> _s = StreamGroup.merge<dynamic>([
+      _stream,
+      _updateController.stream,
+    ]);
+
+    stream = _s.map((dynamic _) => widget.converter(widget.store));
 
     // Don't use `Stream.distinct` because it cannot capture the initial
     // ViewModel produced by the `converter`.
